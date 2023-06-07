@@ -161,7 +161,9 @@ impl RawTask {
         T: Future,
         S: Schedule,
     {
+        // 创建 task cell 指针
         let ptr = Box::into_raw(Cell::<_, S>::new(task, scheduler, State::new(), id));
+        // 把 cell 转换为 Header, 因为 header 在 cell 的第一个字段所以可以转换
         let ptr = unsafe { NonNull::new_unchecked(ptr as *mut Header) };
 
         RawTask { ptr }
@@ -251,6 +253,8 @@ impl Clone for RawTask {
 impl Copy for RawTask {}
 
 unsafe fn poll<T: Future, S: Schedule>(ptr: NonNull<Header>) {
+    // 把 header 转换为 cell , 因为 cell 的第一个字段是 header 所以通过指针是可以转换的
+    // 而 harness 就是包装了一下 cell
     let harness = Harness::<T, S>::from_raw(ptr);
     harness.poll();
 }

@@ -85,6 +85,7 @@ cfg_test_util! {
         base: std::time::Instant,
 
         /// Instant at which the clock was last unfrozen.
+        /// 最后一次解冻时间
         unfrozen: Option<std::time::Instant>,
 
         /// Number of `inhibit_auto_advance` calls still in effect.
@@ -227,8 +228,9 @@ cfg_test_util! {
         /// Returns a new `Clock` instance that uses the current execution context's
         /// source of time.
         pub(crate) fn new(enable_pausing: bool, start_paused: bool) -> Clock {
+            // 获取当前时间
             let now = std::time::Instant::now();
-
+            // 创建 clock 
             let clock = Clock {
                 inner: Mutex::new(Inner {
                     enable_pausing,

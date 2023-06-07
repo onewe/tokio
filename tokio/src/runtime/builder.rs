@@ -1169,12 +1169,18 @@ cfg_rt_multi_thread! {
             use crate::runtime::scheduler::{self, MultiThread};
 
             let core_threads = self.worker_threads.unwrap_or_else(num_cpus);
-
+            // 创建 driver 和 driver handler
+            // driver 负责 poll 事件
+            // driver handler 负责注册事件
             let (driver, driver_handle) = driver::Driver::new(self.get_cfg())?;
 
             // Create the blocking pool
+            // 创建 blocking 线程池, 运行一些阻塞的任务
+            // 线程池大小 默认 为 512 + 核心线程数
             let blocking_pool =
                 blocking::create_blocking_pool(self, self.max_blocking_threads + core_threads);
+                
+            // blocking 线程池创建一个 blocking spawner    
             let blocking_spawner = blocking_pool.spawner().clone();
 
             // Generate a rng seed for this runtime.

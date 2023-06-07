@@ -295,6 +295,7 @@ cfg_rt! {
         T: Future + 'static,
         T::Output: 'static,
     {
+        // 创建 raw task
         let raw = RawTask::new::<T, S>(task, scheduler, id);
         let task = Task {
             raw,

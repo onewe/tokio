@@ -101,9 +101,13 @@ struct Inner {
 }
 
 struct Shared {
+    // 全局共享任务队列
     queue: VecDeque<Task>,
+    // 
     num_notify: u32,
+    // 是否已经关闭
     shutdown: bool,
+    // 发送关闭信号通道
     shutdown_tx: Option<shutdown::Sender>,
     /// Prior to shutdown, we clean up JoinHandles by having each timed-out
     /// thread join on the previous timed-out thread. This is not strictly
@@ -207,6 +211,7 @@ cfg_fs! {
 impl BlockingPool {
     pub(crate) fn new(builder: &Builder, thread_cap: usize) -> BlockingPool {
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        // 默认 keep_alive 10 秒
         let keep_alive = builder.keep_alive.unwrap_or(KEEP_ALIVE);
 
         BlockingPool {
@@ -358,7 +363,10 @@ impl Spawner {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        // 创建 block task
+        // 这种任务很奇特 没有传统的  handler 注册任务 driver poll 事件的机制
         let fut = BlockingTask::new(func);
+        // 生成 task id
         let id = task::Id::next();
         #[cfg(all(tokio_unstable, feature = "tracing"))]
         let fut = {
@@ -381,6 +389,7 @@ impl Spawner {
         #[cfg(not(all(tokio_unstable, feature = "tracing")))]
         let _ = name;
 
+        // 创建一个 unowned task
         let (task, handle) = task::unowned(fut, BlockingSchedule::new(rt), id);
 
         let spawned = self.spawn_task(Task::new(task, is_mandatory), rt);

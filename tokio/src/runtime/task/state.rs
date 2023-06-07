@@ -117,6 +117,7 @@ impl State {
             let action;
             assert!(next.is_notified());
 
+            // 判断当前状态是否是空闲状态如果不是空闲状态
             if !next.is_idle() {
                 // This happens if the task is either currently running or if it
                 // has already completed, e.g. if it was cancelled during
@@ -468,19 +469,26 @@ impl State {
     where
         F: FnMut(Snapshot) -> (T, Option<Snapshot>),
     {
+        // 当前 state value
         let mut curr = self.load();
 
         loop {
+            // 把当前的状态传入到 处理函数里面
+            // 处理函数返回下一个状态
             let (output, next) = f(curr);
+            // 判断是否有下一个状态 如果没有直接返回 函数的输出
             let next = match next {
                 Some(next) => next,
                 None => return output,
             };
 
+            // 修改当前状态的值
             let res = self.val.compare_exchange(curr.0, next.0, AcqRel, Acquire);
 
             match res {
+                // 修改成功返回函数输出
                 Ok(_) => return output,
+                //修改失败 进行 loop 直到修改成功为止
                 Err(actual) => curr = Snapshot(actual),
             }
         }

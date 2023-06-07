@@ -106,27 +106,42 @@ impl Driver {
     /// Creates a new event loop, returning any error that happened during the
     /// creation.
     pub(crate) fn new(nevents: usize) -> io::Result<(Driver, Handle)> {
+        // 创建一个 poll 用于获取事件的底层驱动
         let poll = mio::Poll::new()?;
+        // 注册 TOKEN 用于唤醒 线程 什么都不做的 事件
         #[cfg(not(tokio_wasi))]
         let waker = mio::Waker::new(poll.registry(), TOKEN_WAKEUP)?;
+        
         let registry = poll.registry().try_clone()?;
-
+        // 创建一个 slab , 用于分配 ScheduledIO , 这种比普通分配器效率更高
+        // slab 只能用于获取对象
         let slab = Slab::new();
+        // 创建一个 slab 分配器, 用于分配空间
         let allocator = slab.allocator();
 
         let driver = Driver {
+            // tick 用于计数, 到到默认值 255 释放 slab 空间
             tick: 0,
+            // ready 信号, 表示已经接收到了 ready 信号
             signal_ready: false,
+            // 事件集合, POLL 没拉取一次都会陷入 block 直到有 readiness 事件返回为止
+            // 返回的事件会 回填到 events 集合里 可以通过迭代来访问它
+            // nevents 默认为 1024
             events: mio::Events::with_capacity(nevents),
             poll,
+            // slab 用于通过 事件中的 token 来获取 ScheduledIo
             resources: slab,
         };
 
         let handle = Handle {
+            // 用于注册事件
             registry,
+            // dispatch 用于分发事件
             io_dispatch: RwLock::new(IoDispatcher::new(allocator)),
+            // 此 waker 单纯的用于唤醒一个线程, 什么事也不干
             #[cfg(not(tokio_wasi))]
             waker,
+            // 指标
             metrics: IoDriverMetrics::default(),
         };
 

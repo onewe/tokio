@@ -53,12 +53,16 @@ pub(super) struct CoreStage<T: Future> {
 #[repr(C)]
 pub(super) struct Core<T: Future, S> {
     /// Scheduler used to drive this future.
+    /// // 调度器 一般来讲 这个东西包含了 handler
     pub(super) scheduler: S,
 
     /// The task's ID, used for populating `JoinError`s.
+    /// 任务 id
     pub(super) task_id: Id,
 
     /// Either the future or the output.
+    /// 代表一个 future 的状态 包括 running 、 Finished  、Consumed
+    /// 
     pub(super) stage: CoreStage<T>,
 }
 
@@ -66,12 +70,15 @@ pub(super) struct Core<T: Future, S> {
 #[repr(C)]
 pub(crate) struct Header {
     /// Task state.
+    /// 任务状态
     pub(super) state: State,
 
     /// Pointer to next task, used with the injection queue.
+    /// 连接到 下一个任务的 header
     pub(super) queue_next: UnsafeCell<Option<NonNull<Header>>>,
 
     /// Table of function pointers for executing actions on the task.
+    /// V_TABLE
     pub(super) vtable: &'static Vtable,
 
     /// This integer contains the id of the OwnedTasks or LocalOwnedTasks that
@@ -125,9 +132,12 @@ impl<T: Future, S: Schedule> Cell<T, S> {
     pub(super) fn new(future: T, scheduler: S, state: State, task_id: Id) -> Box<Cell<T, S>> {
         #[cfg(all(tokio_unstable, feature = "tracing"))]
         let tracing_id = future.id();
+        // cell 包含 task 的核心数据
         let result = Box::new(Cell {
             header: Header {
+                // task 状态 初始化状态为 INITIAL_STATE
                 state,
+
                 queue_next: UnsafeCell::new(None),
                 vtable: raw::vtable::<T, S>(),
                 owner_id: UnsafeCell::new(0),
@@ -135,8 +145,10 @@ impl<T: Future, S: Schedule> Cell<T, S> {
                 tracing_id,
             },
             core: Core {
+                // 调度器, 包含前面创建的 handler
                 scheduler,
                 stage: CoreStage {
+                    // future 的状态
                     stage: UnsafeCell::new(Stage::Running(future)),
                 },
                 task_id,

@@ -71,6 +71,8 @@ impl Driver {
             ManuallyDrop::new(unsafe { std::os::unix::net::UnixStream::from_raw_fd(receiver_fd) });
         let mut receiver = UnixStream::from_std(original.try_clone()?);
 
+        // 通过 io handler 注册一个 sign receive 事件
+        // token TOKEN_SIGNAL
         io_handle.register_signal_receiver(&mut receiver)?;
 
         Ok(Self {

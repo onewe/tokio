@@ -41,10 +41,12 @@ pub(crate) struct Cfg {
 
 impl Driver {
     pub(crate) fn new(cfg: Cfg) -> io::Result<(Self, Handle)> {
+        // 创建 IO_STACK IO_DRIVER->SIGNAL_DRIVER->PROCESS_DRIVER
         let (io_stack, io_handle, signal_handle) = create_io_stack(cfg.enable_io, cfg.nevents)?;
-
+        // 创建 clock
         let clock = create_clock(cfg.enable_pause_time, cfg.start_paused);
 
+        // 创建 time Driver
         let (time_driver, time_handle) = create_time_driver(cfg.enable_time, io_stack, &clock);
 
         Ok((
@@ -137,10 +139,14 @@ cfg_io_driver! {
         #[cfg(loom)]
         assert!(!enabled);
 
-        let ret = if enabled {
-            let (io_driver, io_handle) = crate::runtime::io::Driver::new(nevents)?;
+        // IO_DRIVER->SIGNAL_DRIVER->PROCESS_DRIVER
 
+        let ret = if enabled {
+            // 创建 IO DRIVER 和 IO HANDLER
+            let (io_driver, io_handle) = crate::runtime::io::Driver::new(nevents)?;
+            // 创建 SIGNAL DRIVER 和 SIGNAL HANDLER
             let (signal_driver, signal_handle) = create_signal_driver(io_driver, &io_handle)?;
+            // 创建 PROCESS_DRIVER
             let process_driver = create_process_driver(signal_driver);
 
             (IoStack::Enabled(process_driver), IoHandle::Enabled(io_handle), signal_handle)
@@ -227,7 +233,9 @@ cfg_signal_internal_and_unix! {
     pub(crate) type SignalHandle = Option<crate::runtime::signal::Handle>;
 
     fn create_signal_driver(io_driver: IoDriver, io_handle: &crate::runtime::io::Handle) -> io::Result<(SignalDriver, SignalHandle)> {
+        // 创建 signal driver
         let driver = crate::runtime::signal::Driver::new(io_driver, io_handle)?;
+        // 通过 driver 创建一个 事件处理的 handler
         let handle = driver.handle();
         Ok((driver, Some(handle)))
     }
@@ -288,7 +296,9 @@ cfg_time! {
         io_stack: IoStack,
         clock: &Clock,
     ) -> (TimeDriver, TimeHandle) {
+        // 判断是否开启 time 特性
         if enable {
+            // 创建 time driver
             let (driver, handle) = crate::runtime::time::Driver::new(io_stack, clock);
 
             (TimeDriver::Enabled { driver }, Some(handle))
