@@ -41,12 +41,15 @@ const JOIN_WAKER: usize = 0b10_000;
 const CANCELLED: usize = 0b100_000;
 
 /// All bits.
+/// 状态 mask 总共 6位全是1
 const STATE_MASK: usize = LIFECYCLE_MASK | NOTIFIED | JOIN_INTEREST | JOIN_WAKER | CANCELLED;
 
 /// Bits used by the ref count portion of the state.
+/// 状态 mask 取反 只有6位是 0 其余的全是 1
 const REF_COUNT_MASK: usize = !STATE_MASK;
 
 /// Number of positions to shift the ref count.
+/// 6位全是6
 const REF_COUNT_SHIFT: usize = REF_COUNT_MASK.count_zeros() as usize;
 
 /// One ref count.
@@ -115,6 +118,8 @@ impl State {
     pub(super) fn transition_to_running(&self) -> TransitionToRunning {
         self.fetch_update_action(|mut next| {
             let action;
+
+            // 判断当前任务是否处于被唤醒状态
             assert!(next.is_notified());
 
             // 判断当前状态是否是空闲状态如果不是空闲状态
@@ -123,19 +128,27 @@ impl State {
                 // has already completed, e.g. if it was cancelled during
                 // shutdown. Consume the ref-count and return.
                 next.ref_dec();
+                // 判断 next 的引用是否为 0
                 if next.ref_count() == 0 {
+                    // 如果 next 引用为0 则 action 为 Dealloc
                     action = TransitionToRunning::Dealloc;
                 } else {
+                    // 如果引用不为 0 则 action 为 Failed
                     action = TransitionToRunning::Failed;
                 }
             } else {
                 // We are able to lock the RUNNING bit.
+                // 任务为空闲状态, 设置任务状态为 running
                 next.set_running();
+                // 取消 notified 状态
                 next.unset_notified();
 
+                // 判断当前状态是否被取消
                 if next.is_cancelled() {
+                    // 设置 action 为 Cancelled
                     action = TransitionToRunning::Cancelled;
                 } else {
+                    // 设置状态为 Success
                     action = TransitionToRunning::Success;
                 }
             }

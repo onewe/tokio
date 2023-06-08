@@ -223,6 +223,9 @@ impl<T: Future, S: Schedule> Core<T, S> {
         let res = {
             self.stage.stage.with_mut(|ptr| {
                 // Safety: The caller ensures mutual exclusion to the field.
+                // 判断 core 里面的stage 是否是处于运行状态
+                // 如果不是 则 Panic
+                // 如果是 running 状态则提取 future
                 let future = match unsafe { &mut *ptr } {
                     Stage::Running(future) => future,
                     _ => unreachable!("unexpected stage"),
@@ -230,15 +233,20 @@ impl<T: Future, S: Schedule> Core<T, S> {
 
                 // Safety: The caller ensures the future is pinned.
                 let future = unsafe { Pin::new_unchecked(future) };
-
+                // 把 task id 设置到当前线程上下文去
                 let _guard = TaskIdGuard::enter(self.task_id);
+                // 推动 future
                 future.poll(&mut cx)
             })
         };
 
+        // 判断 future 是否已经 ready 了 
+        // 如果 ready 则设置 Stage::Consumed 表示此 future 已经被消费了
         if res.is_ready() {
             self.drop_future_or_output();
         }
+
+        // 返回 Poll 的结果
 
         res
     }

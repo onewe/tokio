@@ -99,6 +99,8 @@ static WAKER_VTABLE: RawWakerVTable =
     RawWakerVTable::new(clone_waker, wake_by_val, wake_by_ref, drop_waker);
 
 fn raw_waker(header: NonNull<Header>) -> RawWaker {
+    // 把 header 结构转换为指针
     let ptr = header.as_ptr() as *const ();
+    // 转换为 waker
     RawWaker::new(ptr, &WAKER_VTABLE)
 }

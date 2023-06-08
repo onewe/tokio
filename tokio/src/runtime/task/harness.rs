@@ -194,8 +194,11 @@ where
         match self.state().transition_to_running() {
             TransitionToRunning::Success => {
                 let header_ptr = self.header_ptr();
+                // 创建 waker_ref 用户 header 亦或者叫 cell
                 let waker_ref = waker_ref::<T, S>(&header_ptr);
+                // 使用 waker 创建一个异步的上下文 cx
                 let cx = Context::from_waker(&waker_ref);
+                // 推动 future 
                 let res = poll_future(self.core(), cx);
 
                 if res == Poll::Ready(()) {
@@ -462,6 +465,7 @@ fn cancel_task<T: Future, S: Schedule>(core: &Core<T, S>) {
 /// stage field.
 fn poll_future<T: Future, S: Schedule>(core: &Core<T, S>, cx: Context<'_>) -> Poll<()> {
     // Poll the future.
+    // 使用 catch_unwind 捕获 Panic
     let output = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         struct Guard<'a, T: Future, S: Schedule> {
             core: &'a Core<T, S>,
@@ -475,10 +479,15 @@ fn poll_future<T: Future, S: Schedule>(core: &Core<T, S>, cx: Context<'_>) -> Po
         }
         let guard = Guard { core };
         let res = guard.core.poll(cx);
+        // forget 掉 guard 保证在正常情况下不会销毁 guard
         mem::forget(guard);
         res
     }));
 
+    /**
+     * 如果 future poll 到 pending 则返回 pending
+     * 如果是 Ready 则 返回 输出结果
+     */
     // Prepare output for being placed in the core stage.
     let output = match output {
         Ok(Poll::Pending) => return Poll::Pending,
@@ -490,7 +499,9 @@ fn poll_future<T: Future, S: Schedule>(core: &Core<T, S>, cx: Context<'_>) -> Po
     };
 
     // Catch and ignore panics if the future panics on drop.
+    // 把 future 的输出存储到 core 中
     let res = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // 设置 core 的状态为 Finished 以便于存储 future 的输出
         core.store_output(output);
     }));
 
