@@ -27,6 +27,7 @@ where
     // point and not an *owned* waker, we must ensure that `drop` is never
     // called on this waker instance. This is done by wrapping it with
     // `ManuallyDrop` and then never calling drop.
+    // waker 人工管理内存释放 不受 rust 规则限制
     let waker = unsafe { ManuallyDrop::new(Waker::from_raw(raw_waker(*header))) };
 
     WakerRef {

@@ -163,16 +163,21 @@ impl State {
     /// cancelled.
     pub(super) fn transition_to_idle(&self) -> TransitionToIdle {
         self.fetch_update_action(|curr| {
+            // 当前 task 是处于 running 状态
             assert!(curr.is_running());
 
+            // 判断当前任务是否已经被取消
             if curr.is_cancelled() {
                 return (TransitionToIdle::Cancelled, None);
             }
 
             let mut next = curr;
             let action;
+            // 取消 running 状态
             next.unset_running();
 
+            // 判断 当前状态是否是 notified 
+            // 如果不是 减少引用
             if !next.is_notified() {
                 // Polling the future consumes the ref-count of the Notified.
                 next.ref_dec();
@@ -185,6 +190,7 @@ impl State {
                 // The caller will schedule a new notification, so we create a
                 // new ref-count for the notification. Our own ref-count is kept
                 // for now, and the caller will drop it shortly.
+                // 如果是被唤醒的则增加 引用
                 next.ref_inc();
                 action = TransitionToIdle::OkNotified;
             }

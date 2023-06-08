@@ -201,11 +201,14 @@ where
                 // 推动 future 
                 let res = poll_future(self.core(), cx);
 
+                // 如果是 ready 状态直接返回 task 的状态 complete
                 if res == Poll::Ready(()) {
                     // The future completed. Move on to complete the task.
                     return PollFuture::Complete;
                 }
 
+                // 如果不是 ready 则代表这个 future 返回了 pending
+                // 把任务状态设置为 idle
                 match self.state().transition_to_idle() {
                     TransitionToIdle::Ok => PollFuture::Done,
                     TransitionToIdle::OkNotified => PollFuture::Notified,
@@ -213,6 +216,7 @@ where
                     TransitionToIdle::Cancelled => {
                         // The transition to idle failed because the task was
                         // cancelled during the poll.
+                        // 取消任务
                         cancel_task(self.core());
                         PollFuture::Complete
                     }
