@@ -1163,11 +1163,14 @@ cfg_test_util! {
 
 cfg_rt_multi_thread! {
     impl Builder {
+        // 构建多线程 runtime
         fn build_threaded_runtime(&mut self) -> io::Result<Runtime> {
             use crate::loom::sys::num_cpus;
             use crate::runtime::{Config, runtime::Scheduler};
             use crate::runtime::scheduler::{self, MultiThread};
 
+            // 获取 work 线程数量 如果没有设置则默认取 cpu 核心数
+            // TOKIO_WORKER_THREADS 取环境变量中设置的核心数
             let core_threads = self.worker_threads.unwrap_or_else(num_cpus);
             // 创建 driver 和 driver handler
             // driver 负责 poll 事件

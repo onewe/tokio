@@ -83,8 +83,10 @@ fn make_fixed_size<T>(buffer: Box<[T]>) -> Box<[T; LOCAL_QUEUE_CAPACITY]> {
 
 /// Create a new local run-queue
 pub(crate) fn local<T: 'static>() -> (Steal<T>, Local<T>) {
+    // 创建默认值容量为 256 的 buffer
     let mut buffer = Vec::with_capacity(LOCAL_QUEUE_CAPACITY);
 
+    // 初始化 buffer
     for _ in 0..LOCAL_QUEUE_CAPACITY {
         buffer.push(UnsafeCell::new(MaybeUninit::uninit()));
     }
@@ -95,10 +97,12 @@ pub(crate) fn local<T: 'static>() -> (Steal<T>, Local<T>) {
         buffer: make_fixed_size(buffer.into_boxed_slice()),
     });
 
+    // 创建 本地执行队列 
     let local = Local {
         inner: inner.clone(),
     };
 
+    // 创建窃取队列
     let remote = Steal(inner);
 
     (remote, local)

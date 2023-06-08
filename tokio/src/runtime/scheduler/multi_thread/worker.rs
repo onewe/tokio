@@ -199,16 +199,23 @@ pub(super) fn create(
     seed_generator: RngSeedGenerator,
     config: Config,
 ) -> (Arc<Handle>, Launch) {
+    // 根据 work 数量创建 Core 容器
     let mut cores = Vec::with_capacity(size);
+    // 根据 work 数量创建 remote 容器
     let mut remotes = Vec::with_capacity(size);
+    // 根据 work 数量创建 work 指标容器
     let mut worker_metrics = Vec::with_capacity(size);
 
     // Create the local queues
     for _ in 0..size {
+        // 分别创建本地执行队列 和 远程窃取队列
         let (steal, run_queue) = queue::local();
 
+        // clone park 对象 park 对象由前面 创建 driver 而创建
         let park = park.clone();
+        // 创建 unpark
         let unpark = park.unpark();
+        // 根据配置创建指标
         let metrics = WorkerMetrics::from_config(&config);
 
         cores.push(Box::new(Core {
@@ -246,6 +253,7 @@ pub(super) fn create(
     let mut launch = Launch(vec![]);
 
     for (index, core) in cores.drain(..).enumerate() {
+        // 创建 worker
         launch.0.push(Arc::new(Worker {
             handle: handle.clone(),
             index,
@@ -394,6 +402,9 @@ fn run(worker: Arc<Worker>) {
 
     // Acquire a core. If this fails, then another thread is running this
     // worker and there is nothing further to do.
+
+    // 获取 worker 中的关键信息 
+    // 每个 core 中包括了 lifo slot 和 本地运行队列
     let core = match worker.core.take() {
         Some(core) => core,
         None => return,
@@ -422,15 +433,28 @@ fn run(worker: Arc<Worker>) {
 
 impl Context {
     fn run(&self, mut core: Box<Core>) -> RunResult {
+        // 只要 worker 没有被关闭 就不停的循环 获取任务
         while !core.is_shutdown {
             // Increment the tick
+            // 每循环一次 增加一次 tick
+            // 该 tick 参与调度优先级的计算
             core.tick();
 
             // Run maintenance, if needed
+            // 判断是否达到 event_interval 的整数倍 如果达到则强行暂停获取 已经 readiness 的 event
             core = self.maintenance(core);
 
             // First, check work available to the current worker.
+            // 在正常情况下 没达到 global_queue_interval 整数倍的情况下
+            // 先获取 work 当前的 lifo_slot 中的任务
+            // 如果没有则获取 当前 work 的 run_queue
+            // 如果没有则获取 global_queue 中的 task
+            // 如果达到 global_queue_interval 整数倍的情况下 
+            // 先获取 global_queue 中的 task
+            // 如果没有 则获取 lifo_slot 中的任务
+            // 然后获取 当前 work 的 run_queue
             if let Some(task) = core.next_task(&self.worker) {
+                // 运行任务
                 core = self.run_task(task, core)?;
                 continue;
             }
@@ -441,9 +465,16 @@ impl Context {
                 core = self.run_task(task, core)?;
             } else {
                 // Wait for work
+                // 判断 需要唤醒的 waker 队列是否为空 如果为空则代表 
+                // 当前的 worker 既没有任务 也没有窃取到到任务
+                // 并且无需要唤醒的事件
+                // 那么该线程需要被 park sleep 住
+                // 如果不为空直接 poll 看是否有 readiness 的事件
+                // 如果 waker 队列不为空 这进行 poll event 操作
                 core = if did_defer_tasks() {
                     self.park_timeout(core, Some(Duration::from_millis(0)))
-                } else {
+                } else { 
+                    // 如果 defer 为空 直接 park 住
                     self.park(core)
                 };
             }
@@ -461,6 +492,8 @@ impl Context {
 
         // Make sure the worker is not in the **searching** state. This enables
         // another idle worker to try to steal work.
+        // 如果当前 work 时最后一个处于 searching 状态的 worker 那么
+        // 这个 worker 就要负责唤醒其他 worker
         core.transition_from_searching(&self.worker);
 
         // Make the core available to the runtime context
@@ -469,6 +502,8 @@ impl Context {
 
         // Run the task
         coop::budget(|| {
+            // 运行任务
+            // 底层执行 poll
             task.run();
 
             // As long as there is budget remaining and a task exists in the
@@ -476,6 +511,8 @@ impl Context {
             loop {
                 // Check if we still have the core. If not, the core was stolen
                 // by another worker.
+                // 判断该 worker 是否任然拥有 core 对象
+                // 如果没有 那就说明 该任务被其他 worker 给偷走了
                 let mut core = match self.core.borrow_mut().take() {
                     Some(core) => core,
                     None => return Err(()),
@@ -489,6 +526,8 @@ impl Context {
                 core.metrics.end_poll();
 
                 // Check for a task in the LIFO slot
+                // 判断 core 对象中的 lifo_slot 是否有任务
+
                 let task = match core.lifo_slot.take() {
                     Some(task) => task,
                     None => return Ok(core),
@@ -498,17 +537,23 @@ impl Context {
                 // doesn't use any Tokio leaf futures. To prevent such tasks
                 // from using the lifo slot in an infinite loop, we consume an
                 // extra unit of budget between each iteration of the loop.
+                // 消费一个 token , 默认数量为 128 
+                // 防止任务被饿死 
                 coop::consume_one();
 
+                // 判断 token 是否还有剩余
                 if coop::has_budget_remaining() {
                     // Run the LIFO task, then loop
                     core.metrics.start_poll();
                     *self.core.borrow_mut() = Some(core);
                     let task = self.worker.handle.shared.owned.assert_owner(task);
+                    // 如果有剩余执行 LIFO task
                     task.run();
                 } else {
                     // Not enough budget left to run the LIFO task, push it to
                     // the back of the queue and return.
+                    // 如果 token 没有剩余就是说 128 被消费完了 
+                    // 则把 FILO 任务放入到本地队列 run_queue 的队尾
                     core.run_queue
                         .push_back(task, self.worker.inject(), &mut core.metrics);
                     return Ok(core);
@@ -518,11 +563,15 @@ impl Context {
     }
 
     fn maintenance(&self, mut core: Box<Core>) -> Box<Core> {
+        // 判断当前 work 是否执行到了 event_interval 的整数倍 
+        // event_interval 默认为 61 如果到了整数倍 先不忙执行任务
+        // 强行暂停判断是否有 readiness 的 event 如果有进行唤醒
         if core.tick % self.worker.handle.shared.config.event_interval == 0 {
             super::counters::inc_num_maintenance();
 
             // Call `park` with a 0 timeout. This enables the I/O driver, timer, ...
             // to run without actually putting the thread to sleep.
+            // 强行暂停取获取 readiness 的 event
             core = self.park_timeout(core, Some(Duration::from_millis(0)));
 
             // Run regularly scheduled maintenance
@@ -609,6 +658,12 @@ impl Core {
 
     /// Return the next notified task available to this worker.
     fn next_task(&mut self, worker: &Worker) -> Option<Notified> {
+        // 避免调度太频繁 多线程调度器是 61 单线程调度器是 31 
+        // 优先调度本地队列 当本地队列调度次数为 61的整数倍时 调度远程队列
+        // 如果远程队列没有在调度本地队列任务
+
+        // 本地队列调度优先调度 lifo_slot 中的任务
+        // 如果 lifo_slot 中没有则调度该 work 的 run_queue 队列中的任务
         if self.tick % worker.handle.shared.config.global_queue_interval == 0 {
             worker.inject().pop().or_else(|| self.next_local_task())
         } else {
@@ -626,22 +681,30 @@ impl Core {
     /// a new worker will actually try to steal. The idea is to make sure not all
     /// workers will be trying to steal at the same time.
     fn steal_work(&mut self, worker: &Worker) -> Option<Notified> {
+        // 判断是否是 searching worker 如果不是 直接 return
         if !self.transition_to_searching(worker) {
             return None;
         }
 
+        // 获取 worker 容器长度
         let num = worker.handle.shared.remotes.len();
         // Start from a random worker
+        // 获取随机数
         let start = self.rand.fastrand_n(num as u32) as usize;
 
         for i in 0..num {
+            // 随机数 + i % worker 总数
             let i = (start + i) % num;
 
             // Don't steal from ourself! We know we don't have work.
+            // 判断 index 是否为自己的 index
             if i == worker.index {
                 continue;
             }
 
+            // 获取 窃取的 remote worker 
+            // 窃取一半的任务到本 worker 的 local queue
+            // 并返回一个任务
             let target = &worker.handle.shared.remotes[i];
             if let Some(task) = target
                 .steal
@@ -652,11 +715,15 @@ impl Core {
         }
 
         // Fallback on checking the global queue
+        // 如果没有窃取到任务 则从 全局 queue 中获取一个
         worker.handle.shared.inject.pop()
     }
 
     fn transition_to_searching(&mut self, worker: &Worker) -> bool {
+        // 如果当前 work 是非 searching worker
         if !self.is_searching {
+            // 则判断当前 searching worker 数量是否达到 worker 总数的一半
+            // 如果未达到 worker 总数的一半这次 worker 被设置为 searching worker
             self.is_searching = worker.handle.shared.idle.transition_worker_to_searching();
         }
 

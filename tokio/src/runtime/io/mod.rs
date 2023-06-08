@@ -118,7 +118,8 @@ impl Driver {
         let slab = Slab::new();
         // 创建一个 slab 分配器, 用于分配空间
         let allocator = slab.allocator();
-
+        
+        // 创建一个 driver
         let driver = Driver {
             // tick 用于计数, 到到默认值 255 释放 slab 空间
             tick: 0,
@@ -133,6 +134,7 @@ impl Driver {
             resources: slab,
         };
 
+        // 创建一个处理器
         let handle = Handle {
             // 用于注册事件
             registry,
@@ -172,10 +174,14 @@ impl Driver {
 
     fn turn(&mut self, handle: &Handle, max_wait: Option<Duration>) {
         // How often to call `compact()` on the resource slab
+        // 设定 255 次归还内存给他 slab 
         const COMPACT_INTERVAL: u8 = 255;
 
+        // compact 次数 + 1
         self.tick = self.tick.wrapping_add(1);
 
+        // 判断 tick 是否达到 COMPACT_INTERVAL 也就是 255 次
+        // 如果达到 归还内存给 slab
         if self.tick == COMPACT_INTERVAL {
             self.resources.compact()
         }
@@ -184,6 +190,7 @@ impl Driver {
 
         // Block waiting for an event to happen, peeling out how many events
         // happened.
+        // 调用底层 等待 readiness 的事件
         match self.poll.poll(events, max_wait) {
             Ok(_) => {}
             Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -197,20 +204,25 @@ impl Driver {
 
         // Process all the events that came in, dispatching appropriately
         let mut ready_count = 0;
+        // 遍历所有 readiness 事件
         for event in events.iter() {
+            // 获取事件中的 token
             let token = event.token();
-
+            // 如果 token 等于 TOKEN_WAKEUP 什么事都不用做 单纯用于唤醒此线程
             if token == TOKEN_WAKEUP {
                 // Nothing to do, the event is used to unblock the I/O driver
             } else if token == TOKEN_SIGNAL {
+                // 如果 token 等于 TOKEN_SIGNAL 那么 signal_ready 设置为 true
                 self.signal_ready = true;
             } else {
+                // dispatch 时间
                 Self::dispatch(
                     &mut self.resources,
                     self.tick,
                     token,
                     Ready::from_mio(event),
                 );
+                // ready count +1 用于设置指标
                 ready_count += 1;
             }
         }
@@ -219,13 +231,16 @@ impl Driver {
     }
 
     fn dispatch(resources: &mut Slab<ScheduledIo>, tick: u8, token: mio::Token, ready: Ready) {
+        // 取 token 中的 右24位 为 slab 索引地址
         let addr = slab::Address::from_usize(ADDRESS.unpack(token.0));
-
+        
+        // 通过索引获取 slab 中的 ScheduledIO
         let io = match resources.get(addr) {
             Some(io) => io,
             None => return,
         };
 
+        // 设置 ScheduledIO 为 readiness
         let res = io.set_readiness(Some(token.0), Tick::Set(tick), |curr| curr | ready);
 
         if res.is_err() {
